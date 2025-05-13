@@ -15,11 +15,10 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# ইউজার লিংক ও নাম্বার ট্র্যাকিং
+# ইউজার লিংক ট্র্যাকিং
 user_links = {}
-download_counts = {}
+audio_links = {}
 
-# স্বাগতম বার্তা
 WELCOME_MSG = """👋 স্বাগতম, {name}!
 
 এই বট ব্যবহার করে আপনি সহজেই TikTok ভিডিও **Watermark ছাড়া** ডাউনলোড করতে পারবেন।
@@ -30,26 +29,36 @@ WELCOME_MSG = """👋 স্বাগতম, {name}!
 
 নিচে থেকে একটি অপশন বেছে নিন:"""
 
-# Start Command
+# চ্যানেল সদস্যতা যাচাই ফাংশন
+async def is_member(user_id):
+    try:
+        chat_member = await bot.get_chat_member(chat_id='@swygenbd', user_id=user_id)
+        return chat_member.status in ['member', 'administrator', 'creator']
+    except:
+        return False
+
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
+    if not await is_member(message.from_user.id):
+        join_button = types.InlineKeyboardMarkup()
+        join_button.add(types.InlineKeyboardButton("✅ এখন জয়েন করুন", url="https://t.me/swygenbd"))
+        await message.answer("❗️এই বটটি ব্যবহারের জন্য আপনাকে আমাদের চ্যানেলে জয়েন করতে হবে।", reply_markup=join_button)
+        return
+
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add("▶️ Download Video", "👨‍💻 Developer")
     await message.answer(WELCOME_MSG.format(name=message.from_user.first_name), reply_markup=keyboard)
 
-# Download অপশন
 @dp.message_handler(lambda message: message.text == "▶️ Download Video")
 async def ask_for_link(message: types.Message):
     await message.reply("🔗 অনুগ্রহ করে TikTok ভিডিওর লিংক পাঠান।")
 
-# Developer Info
 @dp.message_handler(lambda message: message.text == "👨‍💻 Developer")
 async def show_developer_info(message: types.Message):
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(types.InlineKeyboardButton("📩 Admin Contact", url="https://t.me/Swygen_bot"))
-    await message.reply("এই বটটি তৈরি করেছেন Swygen Official।\nযোগাযোগ করতে নিচের বাটনে ক্লিক করুন:", reply_markup=keyboard)
+    await message.reply("এই বটটি তৈরি করেছেন Swygen Official।", reply_markup=keyboard)
 
-# TikTok লিংক হ্যান্ডলার
 @dp.message_handler(lambda message: "tiktok.com" in message.text)
 async def ask_format(message: types.Message):
     user_links[message.from_user.id] = message.text
@@ -60,7 +69,6 @@ async def ask_format(message: types.Message):
     )
     await message.reply("আপনি কোন ফরম্যাটে ডাউনলোড করতে চান?", reply_markup=keyboard)
 
-# ডাউনলোড প্রসেসিং
 @dp.callback_query_handler(lambda c: c.data in ["download_video", "download_audio"])
 async def process_download_option(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
@@ -98,20 +106,23 @@ async def process_download_option(callback_query: types.CallbackQuery):
                 if music_url:
                     if isinstance(music_url, list):
                         music_url = music_url[0]
-                    text = f"✅ অডিও প্রস্তুত! নিচের লিংকে ক্লিক করে ডাউনলোড করুন:\n\n🔗 {music_url}"
-                    sent_msg = await callback_query.message.answer(text)
+
+                    # অডিও লিংক সেভ করা
+                    audio_links[user_id] = music_url
+
+                    download_button = types.InlineKeyboardMarkup()
+                    download_button.add(types.InlineKeyboardButton("⬇️ অডিও ডাউনলোড করুন", callback_data="send_audio_file"))
+                    await callback_query.message.answer("✅ অডিও প্রস্তুত! নিচে ক্লিক করে ডাউনলোড করুন:", reply_markup=download_button)
                 else:
                     await callback_query.message.answer("❌ এই ভিডিওর জন্য আলাদা অডিও খুঁজে পাওয়া যায়নি।")
                     return
 
             await callback_query.answer()
 
-            # ফিডব্যাক বাটন
             feedback_keyboard = types.InlineKeyboardMarkup()
             feedback_keyboard.add(types.InlineKeyboardButton("⭐ মতামত দিন", url="https://t.me/Swygen_bd"))
             await callback_query.message.answer("আপনার অভিজ্ঞতা কেমন ছিল? নিচে ক্লিক করে জানান:", reply_markup=feedback_keyboard)
 
-            # ১ ঘণ্টা পরে ডিলিট (যদি ভিডিও বা মেসেজ থাকে)
             if sent_msg:
                 await asyncio.sleep(3600)
                 try:
@@ -122,6 +133,21 @@ async def process_download_option(callback_query: types.CallbackQuery):
             await callback_query.message.answer("❌ ডাউনলোডে সমস্যা হয়েছে, কিছুক্ষণ পরে চেষ্টা করুন।")
     except Exception as e:
         await callback_query.message.answer(f"⚠️ ত্রুটি ঘটেছে: {str(e)}")
+
+# অডিও ফাইল পাঠানো
+@dp.callback_query_handler(lambda c: c.data == "send_audio_file")
+async def send_audio_file(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    music_url = audio_links.get(user_id)
+
+    if music_url:
+        try:
+            await bot.send_audio(chat_id=user_id, audio=music_url, caption="✅ অডিও সফলভাবে পাঠানো হয়েছে!")
+            await callback_query.answer()
+        except Exception as e:
+            await callback_query.message.answer(f"❌ অডিও পাঠানো যায়নি: {str(e)}")
+    else:
+        await callback_query.message.answer("❌ অডিও লিংক পাওয়া যায়নি।")
 
 # বট চালু রাখার জন্য
 if __name__ == '__main__':
